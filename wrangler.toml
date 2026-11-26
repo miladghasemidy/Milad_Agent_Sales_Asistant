@@ -1,0 +1,11 @@
+name = "sales-super-agent"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "db"
+database_id = "25402811-f49a-475f-8f40-58c54fde8bbf"
+
+[triggers]
+crons = ["30 7 * * *", "30 15 * * *"]

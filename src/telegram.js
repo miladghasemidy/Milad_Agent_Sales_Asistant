@@ -1,37 +1,8 @@
-import {
-  DEFAULT_IGNORED_TABS,
-  MESSENGER_PATTERNS,
-  HEADER_ROLE_RULES,
-  getEffectiveSheetId,
-  getEffectiveReceiptChannelId,
-  columnIndexToLetter,
-  normalizeHeaderTitle,
-  toEnglishDigits,
-  normalizePhoneKey,
-  resolveDynamicColumnMap,
-  detectHeaderRowIndex,
-  extractActiveMessengersByHeaders,
-  getGoogleAccessToken,
-  fetchAllSheetTabs,
-  fetchAllSheetRows,
-  writeSingleCellToSheet
-} from "./sheets.js";
-import {
-  sleep,
-  extractJsonBlock,
-  getGeminiModels,
-  getGroqTextModels,
-  getGroqAudioModel,
-  getGeminiApiKeys,
-  getGroqApiKeys,
-  callAiTextWithFallback,
-  callAiImageWithFallback,
-  callAiAudioWithFallback
-} from "./ai.js";
-
 const AI_CHUNK_SIZE = 15;
 const AI_TASK_FILTER_CHUNK_SIZE = 30;
 const TASKS_PER_SINGLE_MESSAGE = 6;
+
+const DEFAULT_IGNORED_TABS = [];
 
 const CALL_OUTCOME_OPTIONS = [
   { key: "won_sale", label: "موفق - فروش بسته" },
@@ -42,8 +13,544 @@ const CALL_OUTCOME_OPTIONS = [
   { key: "def_no", label: "ناموفق - قطعی نمی‌خواهد" }
 ];
 
-// --- [لایه دیتابیس Cloudflare D1] ---
+const MESSENGER_PATTERNS = [
+  { name: "تلگرام", keywords: ["تلگرام", "telegram"] },
+  { name: "واتساپ", keywords: ["واتساپ", "واتس‌آپ", "whatsapp", "wa"] },
+  { name: "ایتا", keywords: ["ایتا", "eitaa"] },
+  { name: "روبیکا", keywords: ["روبیکا", "rubika"] },
+  { name: "بله", keywords: ["بله", "bale"] },
+  { name: "سروش", keywords: ["سروش", "soroush"] },
+  { name: "اینستاگرام", keywords: ["اینستاگرام", "دایرکت", "instagram", "ig"] }
+];
+
+const HEADER_ROLE_RULES = [
+  { role: "phone", keywords: ["شماره تلفن", "شماره تماس", "شماره همراه", "موبایل", "تلفن", "phone", "mobile", "tel"] },
+  { role: "entryDate", keywords: ["تاریخ ورود", "تاریخ ثبت", "تاریخ تماس", "تاریخ پیگیری", "تاریخ", "date"] },
+  { role: "weekday", keywords: ["روز هفته", "روز", "weekday", "day"] },
+  { role: "name", keywords: ["نام دانشجو", "نام و نام خانوادگی", "نام مشتری", "نام کامل", "دانشجو", "مشتری", "نام", "اسم", "name"] },
+  { role: "status", keywords: ["وضعیت تماس", "نتیجه تماس", "وضعیت پیگیری", "وضعیت", "نتیجه", "حالت", "مرحله", "status", "result"] },
+  { role: "followCount", keywords: ["تعداد پیگیری", "دفعات پیگیری", "شماره پیگیری", "پیگیری‌ها", "تعداد تماس", "دفعات", "پیگیری", "follow"] },
+  { role: "gonCombined", keywords: ["هدف، مانع، نیاز", "هدف مانع نیاز", "هدف و مانع", "دغدغه"] },
+  { role: "goal", keywords: ["هدف", "goal"] },
+  { role: "obstacle", keywords: ["مانع", "موانع"] },
+  { role: "need", keywords: ["نیاز"] },
+  { role: "objection", keywords: ["آبجکشن", "ابجکشن", "اعتراض", "بهانه", "مقاومت", "objection"] },
+  { role: "description", keywords: ["توضیحات", "توضیح", "یادداشت", "شرح", "کامنت", "نکته", "پانوشت", "description", "note", "comment"] },
+  { role: "messengersCol", keywords: ["پیام‌رسان", "پیام رسان", "شبکه اجتماعی", "messenger"] },
+  { role: "rowSerial", keywords: ["شماره ردیف", "شماره لیست", "ردیف", "شماره", "کد", "no", "index"] }
+];
+
+const CHECKMARK_REGEX = /[✅✔✓☑☒]|^(yes|true|ok|بله|دارد|فعال|تیک|x)$/i;
+
 let botStateTableReady = false;
+
+function getEffectiveSheetId(env, ws = null) {
+  return (ws && ws.sheetId) || env.GOOGLE_SHEET_ID;
+}
+
+function getEffectiveReceiptChannelId(env, ws = null) {
+  return (ws && ws.receiptChannelId) || env.RECEIPT_CHANNEL_ID;
+}
+
+function columnIndexToLetter(index) {
+  let num = index + 1;
+  let letters = "";
+  while (num > 0) {
+    const rem = (num - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    num = Math.floor((num - 1) / 26);
+  }
+  return letters;
+}
+
+function normalizeHeaderTitle(title) {
+  return String(title || "")
+    .trim()
+    .replace(/\u200c/g, " ")
+    .replace(/ي/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function toEnglishDigits(str) {
+  const persian = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
+  const arabic = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"];
+  let out = String(str);
+  for (let i = 0; i < 10; i++) {
+    out = out.replaceAll(persian[i], String(i)).replaceAll(arabic[i], String(i));
+  }
+  return out;
+}
+
+function normalizePhoneKey(phone) {
+  const raw = toEnglishDigits(String(phone || "")).trim();
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("00") && digits.length > 8) {
+    const stripped = digits.slice(2);
+    return stripped.startsWith("98") && stripped.length === 12 ? "0" + stripped.slice(2) : stripped;
+  }
+  if (digits.startsWith("98") && digits.length === 12) return "0" + digits.slice(2);
+  if (digits.length === 10 && digits.startsWith("9")) return "0" + digits;
+  return digits;
+}
+
+function isCheckedMark(val) {
+  const s = String(val || "").trim();
+  if (!s) return false;
+  return CHECKMARK_REGEX.test(s) || s.includes("✅") || s.includes("✔") || s.includes("✓") || s.includes("☑");
+}
+
+function resolveDynamicColumnMap(headers = []) {
+  const colMap = {
+    entryDate: -1, rowSerial: -1, weekday: -1, phone: -1, name: -1, status: -1,
+    followCount: -1, goal: -1, obstacle: -1, need: -1, gonCombined: -1,
+    objection: -1, description: -1, messengersCol: -1, messengerDedicatedCols: []
+  };
+  const normalizedHeaders = headers.map((h) => normalizeHeaderTitle(h));
+
+  for (let idx = 0; idx < normalizedHeaders.length; idx++) {
+    const h = normalizedHeaders[idx];
+    if (!h) continue;
+    for (const m of MESSENGER_PATTERNS) {
+      if (m.keywords.some((kw) => h.includes(normalizeHeaderTitle(kw)))) {
+        colMap.messengerDedicatedCols.push({ index: idx, name: m.name });
+      }
+    }
+  }
+
+  for (const rule of HEADER_ROLE_RULES) {
+    let bestIdx = -1;
+    let bestScore = 0;
+    for (let idx = 0; idx < normalizedHeaders.length; idx++) {
+      const h = normalizedHeaders[idx];
+      if (!h) continue;
+      const alreadyAssigned = Object.entries(colMap).some(
+        ([k, v]) => typeof v === "number" && v === idx && k !== rule.role
+      );
+      if (alreadyAssigned) continue;
+      for (const kw of rule.keywords) {
+        const normKw = normalizeHeaderTitle(kw);
+        if (h === normKw && 100 + normKw.length > bestScore) {
+          bestScore = 100 + normKw.length;
+          bestIdx = idx;
+        } else if (h.includes(normKw) && normKw.length * 2 > bestScore) {
+          bestScore = normKw.length * 2;
+          bestIdx = idx;
+        }
+      }
+    }
+    if (bestIdx !== -1) colMap[rule.role] = bestIdx;
+  }
+  return colMap;
+}
+
+function detectHeaderRowIndex(rows) {
+  let bestRowIdx = 0;
+  let bestMatches = -1;
+  const limit = Math.min(rows.length, 10);
+  for (let rIdx = 0; rIdx < limit; rIdx++) {
+    const row = rows[rIdx] || [];
+    const map = resolveDynamicColumnMap(row);
+    let matches = 0;
+    if (map.phone !== -1) matches += 2;
+    if (map.name !== -1) matches += 2;
+    if (map.status !== -1) matches += 1;
+    if (map.followCount !== -1) matches += 1;
+    if (map.description !== -1) matches += 1;
+    matches += map.messengerDedicatedCols.length;
+    if (matches > bestMatches) {
+      bestMatches = matches;
+      bestRowIdx = rIdx;
+    }
+  }
+  return bestRowIdx;
+}
+
+function extractActiveMessengersByHeaders(rawRow, colMap) {
+  const found = new Set();
+  for (const mCol of colMap.messengerDedicatedCols) {
+    const val = String(rawRow[mCol.index] || "").trim();
+    const lowerVal = normalizeHeaderTitle(val);
+    if (!val) continue;
+    if (
+      isCheckedMark(val) ||
+      (!lowerVal.includes("ندارد") && !lowerVal.includes("خیر") && !lowerVal.includes("غیرفعال") && lowerVal !== "0" && lowerVal !== "-")
+    ) {
+      found.add(mCol.name);
+    }
+  }
+  if (colMap.messengersCol !== -1) {
+    const cellVal = normalizeHeaderTitle(rawRow[colMap.messengersCol] || "");
+    if (cellVal) {
+      for (const m of MESSENGER_PATTERNS) {
+        if (m.keywords.some((kw) => cellVal.includes(normalizeHeaderTitle(kw))) && !cellVal.includes("ندارد")) {
+          found.add(m.name);
+        }
+      }
+    }
+  }
+  return Array.from(found);
+}
+
+async function getGoogleAccessToken(serviceAccountJson) {
+  if (!serviceAccountJson) throw new Error("متغیر GOOGLE_SERVICE_ACCOUNT_JSON تنظیم نشده است.");
+  const sa = JSON.parse(serviceAccountJson);
+  const header = { alg: "RS256", typ: "JWT" };
+  const now = Math.floor(Date.now() / 1000);
+  const claimSet = {
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/spreadsheets",
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now
+  };
+
+  const encodeBase64Url = (obj) => {
+    const str = typeof obj === "string" ? obj : JSON.stringify(obj);
+    const bytes = new TextEncoder().encode(str);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  };
+
+  const unsignedToken = `${encodeBase64Url(header)}.${encodeBase64Url(claimSet)}`;
+  const pemContents = sa.private_key
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\s+/g, "");
+  const binaryDerString = atob(pemContents);
+  const binaryDer = new Uint8Array(binaryDerString.length);
+  for (let i = 0; i < binaryDerString.length; i++) binaryDer[i] = binaryDerString.charCodeAt(i);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    binaryDer.buffer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", cryptoKey, new TextEncoder().encode(unsignedToken));
+  const sigBytes = new Uint8Array(signature);
+  let sigBinary = "";
+  for (let i = 0; i < sigBytes.length; i++) sigBinary += String.fromCharCode(sigBytes[i]);
+  const encodedSig = btoa(sigBinary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const jwt = `${unsignedToken}.${encodedSig}`;
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+  });
+
+  const tokenData = await tokenRes.json();
+  if (!tokenData.access_token) throw new Error("خطای احراز هویت گوگل");
+  return tokenData.access_token;
+}
+
+async function fetchAllSheetTabs(env, ws = null) {
+  const sheetId = getEffectiveSheetId(env, ws);
+  const accessToken = await getGoogleAccessToken(env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const meta = await metaRes.json();
+  if (!meta.sheets) throw new Error("دسترسی به شیت برقرار نشد.");
+  const ignored = env.IGNORED_TABS ? env.IGNORED_TABS.split(",").map((t) => t.trim()) : DEFAULT_IGNORED_TABS;
+  return meta.sheets.map((s) => s.properties.title).filter((t) => !ignored.includes(t));
+}
+
+async function fetchAllSheetRows(env, ws = null) {
+  const sheetId = getEffectiveSheetId(env, ws);
+  const accessToken = await getGoogleAccessToken(env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const allTabs = await fetchAllSheetTabs(env, ws);
+  if (allTabs.length === 0) return { tabsData: [], currentMap: {}, totalStudents: 0 };
+
+  const rangesParam = allTabs.map((t) => `ranges=${encodeURIComponent(`${t}!A1:AZ2000`)}`).join("&");
+  const batchRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangesParam}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const batchData = await batchRes.json();
+  if (!batchData.valueRanges) throw new Error(batchData.error?.message || "خطا در خواندن اطلاعات تب‌های شیت");
+
+  const strikeMapByTab = {};
+  try {
+    const gridRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?includeGridData=true&fields=sheets(properties.title,data.rowData.values.userEnteredFormat.textFormat.strikethrough,data.rowData.values.effectiveFormat.textFormat.strikethrough)&${rangesParam}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (gridRes.ok) {
+      const gridJson = await gridRes.json();
+      for (const sh of gridJson.sheets || []) {
+        const strikeRows = [];
+        for (const gd of sh.data || []) {
+          for (const rd of gd.rowData || []) {
+            strikeRows.push(
+              (rd.values || []).map((v) =>
+                Boolean(v?.userEnteredFormat?.textFormat?.strikethrough || v?.effectiveFormat?.textFormat?.strikethrough)
+              )
+            );
+          }
+        }
+        strikeMapByTab[sh.properties?.title || ""] = strikeRows;
+      }
+    }
+  } catch {}
+
+  const tabsData = [];
+  const currentMap = {};
+  let totalStudents = 0;
+
+  for (let tIdx = 0; tIdx < allTabs.length; tIdx++) {
+    const tab = allTabs[tIdx];
+    const rows = batchData.valueRanges[tIdx]?.values || [];
+    if (rows.length === 0) {
+      tabsData.push({ tab, rows: [] });
+      continue;
+    }
+
+    const headerIdx = detectHeaderRowIndex(rows);
+    const headers = rows[headerIdx] || [];
+    const colMap = resolveDynamicColumnMap(headers);
+    const strikeRows = strikeMapByTab[tab] || [];
+    const getCellByRole = (rowArr, role) => (colMap[role] !== -1 ? String(rowArr[colMap[role]] || "").trim() : "");
+
+    const parsedRows = [];
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const phone = getCellByRole(r, "phone");
+      const name = getCellByRole(r, "name");
+      if (!phone && !name) continue;
+
+      const isNameStruck =
+        colMap.name !== -1 && Array.isArray(strikeRows[i]) ? Boolean(strikeRows[i][colMap.name]) : false;
+
+      const fields = {
+        entryDate: getCellByRole(r, "entryDate"),
+        rowSerial: getCellByRole(r, "rowSerial"),
+        weekday: getCellByRole(r, "weekday"),
+        phone,
+        name,
+        status: getCellByRole(r, "status"),
+        followCount: getCellByRole(r, "followCount"),
+        goal: getCellByRole(r, "goal"),
+        obstacle: getCellByRole(r, "obstacle"),
+        need: getCellByRole(r, "need"),
+        gonCombined: getCellByRole(r, "gonCombined"),
+        objection: getCellByRole(r, "objection"),
+        description: getCellByRole(r, "description")
+      };
+
+      const messengers = extractActiveMessengersByHeaders(r, colMap);
+      parsedRows.push({ rowNum: i + 1, phone, rawRow: r, fields, messengers, isNameStruck });
+
+      const normPhone = normalizePhoneKey(phone);
+      currentMap[`${tab}::${normPhone || `row_${i + 1}`}`] = { tab, phone, fields, messengers, isNameStruck };
+      totalStudents++;
+    }
+    tabsData.push({ tab, headers, colMap, rows: parsedRows });
+  }
+
+  return { tabsData, currentMap, totalStudents };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractJsonBlock(text) {
+  const match = String(text || "").match(/\{[\s\S]*\}/);
+  return match ? match[0] : text;
+}
+
+function getGeminiModels(env) {
+  if (env.GEMINI_MODELS) {
+    const list = env.GEMINI_MODELS.split(",")
+      .map((m) => m.trim())
+      .filter((m) => Boolean(m) && m !== "gemini-2.5-flash-lite");
+    if (list.length > 0) return list;
+  }
+  return ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+}
+
+function getGroqTextModels(env) {
+  if (env.GROQ_TEXT_MODEL) {
+    const list = env.GROQ_TEXT_MODEL.split(",").map((m) => m.trim()).filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  return ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
+}
+
+function getGroqAudioModel(env) {
+  return (env.GROQ_AUDIO_MODEL || "whisper-large-v3-turbo").trim();
+}
+
+function getGeminiApiKeys(env) {
+  return [...new Set([env.GEMINI_API_KEY_1 || env.GEMINI_API_KEY, env.GEMINI_API_KEY_2, env.GEMINI_API_KEY_3].map((k) => (k || "").trim()).filter(Boolean))];
+}
+
+function getGroqApiKeys(env) {
+  return [...new Set([env.GROQ_API_KEY, env.GROQ_API_KEY_1, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3].map((k) => (k || "").trim()).filter(Boolean))];
+}
+
+function isDailyQuotaError(errMsg) {
+  const lower = errMsg.toLowerCase();
+  return lower.includes("per day") || lower.includes("free_tier_requests") || lower.includes("exceeded your current quota") || lower.includes("invalid api key");
+}
+
+function isTemporarySpikeError(status, errMsg) {
+  const lower = errMsg.toLowerCase();
+  return status === 503 || status === 429 || lower.includes("high demand") || lower.includes("overloaded") || lower.includes("rate limit");
+}
+
+async function callAiTextWithFallback(env, systemPrompt, userPrompt, jobCtx = null, deadKeys = new Set(), checkStopFn = null) {
+  const geminiKeys = getGeminiApiKeys(env);
+  const groqKeys = getGroqApiKeys(env);
+  if (geminiKeys.length === 0 && groqKeys.length === 0) throw new Error("هیچ کلید API برای Gemini یا Groq تنظیم نشده است.");
+
+  const errors = [];
+  if (geminiKeys.length > 0) {
+    for (const model of getGeminiModels(env)) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        let sawSpike = false;
+        for (let i = 0; i < geminiKeys.length; i++) {
+          const keyTag = `gemini::${model}::${i}`;
+          if (deadKeys.has(keyTag)) continue;
+          if (jobCtx && checkStopFn) await checkStopFn(env, jobCtx.chatId, jobCtx.jobId);
+          try {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKeys[i]}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+                generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+              })
+            });
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (res.ok && text) return { model: `${model} (کلید ${i + 1})`, text };
+            const errMsg = data.error?.message || String(res.status);
+            if (isDailyQuotaError(errMsg)) deadKeys.add(keyTag);
+            else if (isTemporarySpikeError(res.status, errMsg)) sawSpike = true;
+            errors.push(`[${model}]: ${errMsg}`);
+          } catch (e) {
+            if (e.message === "USER_ABORTED") throw e;
+            errors.push(e.message);
+          }
+        }
+        if (sawSpike && attempt < 2) await sleep(2500);
+        else break;
+      }
+    }
+  }
+
+  if (groqKeys.length > 0) {
+    for (const model of getGroqTextModels(env)) {
+      for (let i = 0; i < groqKeys.length; i++) {
+        try {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${groqKeys[i]}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
+              temperature: 0.2,
+              response_format: { type: "json_object" }
+            })
+          });
+          const data = await res.json();
+          const text = data.choices?.[0]?.message?.content;
+          if (res.ok && text) return { model: `Groq ${model} (کلید ${i + 1})`, text };
+        } catch (e) {
+          errors.push(e.message);
+        }
+      }
+    }
+  }
+
+  throw new Error(`خطا در هوش مصنوعی:\n${errors.slice(-3).join("\n")}`);
+}
+
+async function callAiImageWithFallback(env, prompt, imageBuffer, mimeType) {
+  const geminiKeys = getGeminiApiKeys(env);
+  if (geminiKeys.length === 0) throw new Error("کلید GEMINI_API_KEY تنظیم نشده است.");
+
+  const bytes = new Uint8Array(imageBuffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  const base64Image = btoa(binary);
+
+  for (const model of getGeminiModels(env)) {
+    for (let i = 0; i < geminiKeys.length; i++) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKeys[i]}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
+          generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+        })
+      });
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (res.ok && text) return { model: `${model} Vision (کلید ${i + 1})`, text };
+    }
+  }
+  throw new Error("خواندن تصویر فیش ناموفق بود.");
+}
+
+async function callAiAudioWithFallback(env, prompt, audioBuffer, mimeType) {
+  const geminiKeys = getGeminiApiKeys(env);
+  const groqKeys = getGroqApiKeys(env);
+
+  if (geminiKeys.length > 0) {
+    const bytes = new Uint8Array(audioBuffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    const base64Audio = btoa(binary);
+
+    for (const model of getGeminiModels(env)) {
+      for (let i = 0; i < geminiKeys.length; i++) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKeys[i]}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Audio } }] }],
+            generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+          })
+        });
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (res.ok && text) return { model: `${model} Audio (کلید ${i + 1})`, text };
+      }
+    }
+  }
+
+  if (groqKeys.length > 0) {
+    const form = new FormData();
+    form.append("file", new Blob([audioBuffer], { type: mimeType }), "call.ogg");
+    form.append("model", getGroqAudioModel(env));
+    form.append("language", "fa");
+
+    const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${groqKeys[0]}` },
+      body: form
+    });
+    const data = await res.json();
+    if (res.ok && data.text) {
+      const llmRes = await callAiTextWithFallback(env, prompt, `متن مکالمه:\n${data.text}`);
+      return { model: `Groq Whisper + ${llmRes.model}`, text: llmRes.text };
+    }
+  }
+
+  throw new Error("تحلیل فایل صوتی ناموفق بود.");
+}
 
 async function ensureBotStateTable(env) {
   if (!env.DB) {
@@ -98,7 +605,6 @@ async function dbDelete(env, key) {
   await env.DB.prepare("DELETE FROM bot_state WHERE k = ?").bind(key).run();
 }
 
-// --- [لایه احراز هویت و مدیریت فضای کاری] ---
 function parseConfiguredUsers(env) {
   if (env.AUTH_USERS_JSON) {
     try {
@@ -223,11 +729,7 @@ async function startLoginFlow(env, chatId, telegramUserId, promptNote = "") {
   const uid = String(telegramUserId);
   const configuredUsers = parseConfiguredUsers(env);
   if (configuredUsers.length === 0) {
-    await sendTelegramMessage(
-      env.BOT_TOKEN,
-      chatId,
-      "⚠️ *حساب کاربری در متغیرهای محیطی Worker تنظیم نشده است.*"
-    );
+    await sendTelegramMessage(env.BOT_TOKEN, chatId, "⚠️ *حساب کاربری در متغیرهای محیطی Worker تنظیم نشده است.*");
     return;
   }
 
@@ -321,7 +823,6 @@ async function handleAuthenticationGate(update, env) {
   return null;
 }
 
-// --- [توابع کمکی وضعیت، تاریخ، شماره و گزارش‌ها] ---
 function normalizeStatusComparable(str) {
   return normalizeHeaderTitle(str).replace(/\s*-\s*/g, "-").replace(/\s*–\s*/g, "-").trim();
 }
@@ -475,26 +976,6 @@ function formatFollowUpNoteEntry(outcomeLabel, extraNote = "") {
   return `پیگیری شد (${clock} - ${dayLabel}) (${outcomeLabel})${bracketPart}///`;
 }
 
-function formatContactFullName(studentName) {
-  const cleanName = String(studentName || "").trim() || "دانشجو";
-  return `${cleanName} آیولرن شاتل آذر`;
-}
-
-function buildVCardString(studentName, phone, note = "") {
-  const fullName = formatContactFullName(studentName);
-  const cleanPhone = normalizePhoneKey(phone) || String(phone || "").trim();
-  const cleanNote = String(note || "").replace(/\r?\n/g, " ").trim();
-  return [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    `FN:${fullName}`,
-    `N:${fullName};;;;`,
-    cleanPhone ? `TEL;TYPE=CELL:${cleanPhone}` : "",
-    cleanNote ? `NOTE:${cleanNote}` : "",
-    "END:VCARD"
-  ].filter(Boolean).join("\r\n");
-}
-
 function collectPresetOptionsFromRows(rows = [], fieldKey) {
   const set = new Set();
   for (const r of rows) {
@@ -533,7 +1014,7 @@ function fallbackPresetMatch(presetOptions = [], preferredValues = [], fieldKey 
 }
 
 async function resolvePresetFieldsWithAi(env, params) {
-  const { outcomeLabel, extraDescription, currentFields = {}, rowNum, presets = {} } = params;
+  const { outcomeLabel, currentFields = {}, rowNum, presets = {} } = params;
   const canonicalOutcome = canonicalizeOutcomeLabel(outcomeLabel);
   const todayGreg = getGregorianSheetDate();
 
@@ -815,7 +1296,7 @@ async function collectTodayTasks(env, mode = "all", ws = null) {
     else followUps.push(item);
   }
 
-  let selected = mode === "morning" ? [...newCalls] : mode === "evening" ? [...followUps] : [...newCalls, ...followUps];
+  const selected = mode === "morning" ? [...newCalls] : mode === "evening" ? [...followUps] : [...newCalls, ...followUps];
   return { newCalls, followUps, followedCountToday, totalStudents, tabsCount: tabsData.length, selected };
 }
 
@@ -875,10 +1356,6 @@ async function writeFollowUpUpdatesToSheet(env, taskRef, payload, ws = null) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || "عدم دسترسی نوشتن در گوگل‌شیت");
-}
-
-async function fillSalesExcelAndCopyOffForStudent(env, student, receiptData = {}, captionHint = "", ws = null) {
-  return { updatedCount: 0, details: [] };
 }
 
 async function sendInteractiveTaskItems(env, chatId, mode = "all", ws = null) {
@@ -1054,7 +1531,11 @@ export {
   writeFollowUpUpdatesToSheet,
   addTaskToFollowedUpSection,
   appendPersonalDailyWorkLog,
-  fillSalesExcelAndCopyOffForStudent,
+  fetchAllSheetRows,
+  getEffectiveReceiptChannelId,
+  callAiImageWithFallback,
+  callAiAudioWithFallback,
+  extractJsonBlock,
   handleTelegramUpdate,
   sendInteractiveTaskItems,
   buildBeautifulDailyWorkReport,

@@ -20,10 +20,12 @@ import {
   writeFollowUpUpdatesToSheet,
   addTaskToFollowedUpSection,
   appendPersonalDailyWorkLog,
-  fillSalesExcelAndCopyOffForStudent
+  fetchAllSheetRows,
+  getEffectiveReceiptChannelId,
+  callAiImageWithFallback,
+  callAiAudioWithFallback,
+  extractJsonBlock
 } from "./telegram.js";
-import { fetchAllSheetRows, getEffectiveReceiptChannelId } from "./sheets.js";
-import { callAiImageWithFallback, callAiAudioWithFallback, extractJsonBlock } from "./ai.js";
 
 function jsonCors(data, status = 200) {
   return new Response(JSON.stringify(data), {

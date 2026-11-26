@@ -530,6 +530,72 @@ document.getElementById("voiceFileInput").addEventListener("change", (e) => {
   if (file) document.getElementById("voiceFileName").textContent = file.name;
 });
 
+// پردازش فیش واریزی از طریق API پنل
+ document.getElementById("uploadReceiptBtn").addEventListener("click", async () => {
+  const file = document.getElementById("receiptFileInput").files?.[0];
+  const resultBox = document.getElementById("receiptResultBox");
+  if (!file) return showToast("ابتدا تصویر فیش را انتخاب کنید.");
+  if (state.isDemo) return showToast("پردازش هوش مصنوعی در حالت دمو فعال نیست.");
+
+  const button = document.getElementById("uploadReceiptBtn");
+  const originalHtml = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = "در حال استخراج اطلاعات فیش...";
+  resultBox.classList.remove("hidden");
+  resultBox.textContent = "در حال ارسال تصویر و تحلیل آن...";
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("caption", document.getElementById("receiptCaptionInput").value.trim());
+    const result = await apiRequest("/api/receipt", { method: "POST", body: form });
+    resultBox.textContent = `اطلاعات استخراج‌شده:
+${JSON.stringify(result.data || {}, null, 2)}
+مدل: ${result.model || "نامشخص"}`;
+    showToast("اطلاعات فیش با موفقیت استخراج شد.");
+  } catch (err) {
+    resultBox.textContent = `خطا در پردازش فیش: ${err.message}`;
+    showToast(err.message);
+  } finally {
+    button.disabled = false;
+    button.innerHTML = originalHtml;
+    refreshIcons();
+  }
+});
+
+// تحلیل فایل صوتی مکالمه از طریق API پنل
+ document.getElementById("uploadVoiceBtn").addEventListener("click", async () => {
+  const file = document.getElementById("voiceFileInput").files?.[0];
+  const resultBox = document.getElementById("voiceResultBox");
+  if (!file) return showToast("ابتدا فایل صوتی مکالمه را انتخاب کنید.");
+  if (state.isDemo) return showToast("تحلیل صوتی در حالت دمو فعال نیست.");
+
+  const button = document.getElementById("uploadVoiceBtn");
+  const originalHtml = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = "در حال تحلیل مکالمه...";
+  resultBox.classList.remove("hidden");
+  resultBox.textContent = "فایل صوتی در حال ارسال و تحلیل است...";
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("caption", document.getElementById("voiceCaptionInput").value.trim());
+    const result = await apiRequest("/api/voice", { method: "POST", body: form });
+    resultBox.textContent = `نتیجه تحلیل مکالمه:
+${JSON.stringify(result.analysis || {}, null, 2)}
+مدل: ${result.model || "نامشخص"}`;
+    showToast("تحلیل مکالمه با موفقیت انجام شد.");
+  } catch (err) {
+    resultBox.textContent = `خطا در تحلیل مکالمه: ${err.message}`;
+    showToast(err.message);
+  } finally {
+    button.disabled = false;
+    button.innerHTML = originalHtml;
+    refreshIcons();
+  }
+});
+
 // مقداردهی اولیه آیکون‌ها هنگام لود صفحه
 document.addEventListener("DOMContentLoaded", refreshIcons);
 refreshIcons();

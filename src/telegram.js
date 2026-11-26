@@ -1,0 +1,63 @@
+import {
+  DEFAULT_IGNORED_TABS,
+  MESSENGER_PATTERNS,
+  HEADER_ROLE_RULES,
+  getEffectiveSheetId,
+  getEffectiveReceiptChannelId,
+  columnIndexToLetter,
+  normalizeHeaderTitle,
+  toEnglishDigits,
+  normalizePhoneKey,
+  resolveDynamicColumnMap,
+  detectHeaderRowIndex,
+  extractActiveMessengersByHeaders,
+  getGoogleAccessToken,
+  fetchAllSheetTabs,
+  fetchAllSheetRows,
+  writeSingleCellToSheet
+} from "./sheets.js";
+import {
+  sleep,
+  extractJsonBlock,
+  getGeminiModels,
+  getGroqTextModels,
+  getGroqAudioModel,
+  getGeminiApiKeys,
+  getGroqApiKeys,
+  callAiTextWithFallback,
+  callAiImageWithFallback,
+  callAiAudioWithFallback
+} from "./ai.js";
+
+// در انتهای فایل src/telegram.js نیز این خط را اضافه کنید:
+export {
+  CALL_OUTCOME_OPTIONS,
+  parseConfiguredUsers,
+  ensureBotStateTable,
+  dbGet,
+  dbPut,
+  normalizeHeaderTitle,
+  normalizePhoneKey,
+  toEnglishDigits,
+  parseNumericFollowCount,
+  canonicalizeOutcomeLabel,
+  getTehranTimeDisplay,
+  getTehranDateDisplay,
+  getTodayTehranKey,
+  buildTaskIdentityKeys,
+  formatFollowUpNoteEntry,
+  shouldRequeueSameDayFromNote,
+  resolvePresetFieldsWithAi,
+  collectTodayTasks,
+  writeFollowUpUpdatesToSheet,
+  addTaskToFollowedUpSection,
+  appendPersonalDailyWorkLog,
+  fillSalesExcelAndCopyOffForStudent,
+  handleTelegramUpdate,
+  sendInteractiveTaskItems,
+  buildBeautifulDailyWorkReport,
+  buildDailyStudentChangesReport,
+  sendLongTelegramMessages,
+  sendTelegramMessage,
+  ensureTelegramWebhookConfigured
+};

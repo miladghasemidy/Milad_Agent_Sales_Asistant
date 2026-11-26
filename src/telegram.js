@@ -28,36 +28,3 @@ import {
   callAiImageWithFallback,
   callAiAudioWithFallback
 } from "./ai.js";
-
-// در انتهای فایل src/telegram.js نیز این خط را اضافه کنید:
-export {
-  CALL_OUTCOME_OPTIONS,
-  parseConfiguredUsers,
-  ensureBotStateTable,
-  dbGet,
-  dbPut,
-  normalizeHeaderTitle,
-  normalizePhoneKey,
-  toEnglishDigits,
-  parseNumericFollowCount,
-  canonicalizeOutcomeLabel,
-  getTehranTimeDisplay,
-  getTehranDateDisplay,
-  getTodayTehranKey,
-  buildTaskIdentityKeys,
-  formatFollowUpNoteEntry,
-  shouldRequeueSameDayFromNote,
-  resolvePresetFieldsWithAi,
-  collectTodayTasks,
-  writeFollowUpUpdatesToSheet,
-  addTaskToFollowedUpSection,
-  appendPersonalDailyWorkLog,
-  fillSalesExcelAndCopyOffForStudent,
-  handleTelegramUpdate,
-  sendInteractiveTaskItems,
-  buildBeautifulDailyWorkReport,
-  buildDailyStudentChangesReport,
-  sendLongTelegramMessages,
-  sendTelegramMessage,
-  ensureTelegramWebhookConfigured
-};

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sales Super Agent | پلتفرم هوشمند مدیریت فروش</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- پس‌زمینه انیمیشنی Aurora + ذرات نوری -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="beam-line"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <!-- صفحه ورود (Login Gate) -->
+  <section id="loginView" class="login-wrapper">
+    <div class="glass-card spotlight-card login-card animate-pop">
+      <div class="brand-badge">
+        <i data-lucide="sparkles" class="icon-xs"></i>
+        <span>AI SALES INTELLIGENCE</span>
+      </div>
+      <div class="login-logo-ring">
+        <i data-lucide="cpu" class="icon-lg"></i>
+      </div>
+      <h1 class="login-title">پلتفرم هوشمند مدیریت فروش</h1>
+      <p class="login-subtitle">یکپارچه با Google Sheets، دیتابیس D1 و هسته پردازش Gemini &amp; Groq</p>
+
+      <form id="loginForm" class="login-form">
+        <div class="input-group">
+          <label for="workerUrl">آدرس سرور Cloudflare Worker</label>
+          <div class="input-with-icon">
+            <i data-lucide="globe" class="input-icon"></i>
+            <input type="url" id="workerUrl" placeholder="https://sales-super-agent.your-name.workers.dev" dir="ltr" />
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="username">نام کاربری</label>
+          <div class="input-with-icon">
+            <i data-lucide="user" class="input-icon"></i>
+            <input type="text" id="username" placeholder="miladghasemi" required />
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="password">رمز عبور</label>
+          <div class="input-with-icon">
+            <i data-lucide="lock" class="input-icon"></i>
+            <input type="password" id="password" placeholder="••••••••" required />
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-glow w-full">
+          <span>ورود به فضای کاری</span>
+          <i data-lucide="arrow-left" class="icon-sm"></i>
+        </button>
+      </form>
+
+      <div class="divider"><span>دسترسی سریع آزمایشی</span></div>
+
+      <button id="demoLoginBtn" type="button" class="btn btn-glass w-full">
+        <i data-lucide="play-circle" class="icon-sm"></i>
+        <span>اجرای محیط نمایشی زنده (Live Demo)</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- محیط اصلی داشبورد -->
+  <div id="appShell" class="app-shell hidden">
+    <!-- نوار کناری (Sidebar) -->
+    <aside class="sidebar glass-panel">
+      <div>
+        <div class="sidebar-header">
+          <div class="logo-box">
+            <i data-lucide="zap" class="icon-md"></i>
+          </div>
+          <div>
+            <h2 class="brand-name">Sales Core</h2>
+            <span id="connectionBadge" class="status-pill">
+              <span class="pulse-dot"></span>
+              <span>سیستم فعال</span>
+            </span>
+          </div>
+        </div>
+
+        <nav class="nav-menu">
+          <button class="nav-item active" data-tab="dashboard">
+            <i data-lucide="layout-dashboard" class="icon-sm"></i>
+            <span>داشبورد و آمار</span>
+          </button>
+          <button class="nav-item" data-tab="tasks">
+            <i data-lucide="phone-outgoing" class="icon-sm"></i>
+            <span>میز کار تماس‌ها</span>
+            <span id="navTasksCount" class="nav-badge">0</span>
+          </button>
+          <button class="nav-item" data-tab="students">
+            <i data-lucide="users" class="icon-sm"></i>
+            <span>پرونده دانشجوها</span>
+          </button>
+          <button class="nav-item" data-tab="followed">
+            <i data-lucide="check-circle-2" class="icon-sm"></i>
+            <span>پیگیری شده‌ها</span>
+          </button>
+          <button class="nav-item" data-tab="aiTools">
+            <i data-lucide="brain-circuit" class="icon-sm"></i>
+            <span>تحلیل ویس و فیش</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div class="avatar">
+            <i data-lucide="shield-check" class="icon-sm"></i>
+          </div>
+          <div class="user-meta">
+            <strong id="sidebarUserName">میلاد قاسمی</strong>
+            <small id="sidebarModeLabel">حالت متصل</small>
+          </div>
+        </div>
+        <button id="logoutBtn" class="btn btn-danger-soft w-full">
+          <i data-lucide="log-out" class="icon-sm"></i>
+          <span>خروج از حساب</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- محتوای اصلی -->
+    <main class="main-content">
+      <header class="topbar glass-panel">
+        <div>
+          <h1 id="pageTitle" class="page-title">داشبورد عملکرد روزانه</h1>
+          <p id="todayDateLabel" class="page-subtitle">در حال همگام‌سازی...</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshDataBtn" class="btn btn-glass">
+            <i data-lucide="refresh-cw" class="icon-sm spin-hover"></i>
+            <span>همگام‌سازی شیت</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- تب ۱: داشبورد -->
+      <section id="tab-dashboard" class="tab-view active">
+        <div class="stats-grid">
+          <div class="stat-card glass-card spotlight-card animate-up" style="--delay: 0.05s">
+            <div class="stat-icon blue">
+              <i data-lucide="phone-call" class="icon-md"></i>
+            </div>
+            <div class="stat-info">
+              <span>تماس‌های اول باقی‌مانده</span>
+              <h3 id="statNewCalls">0</h3>
+            </div>
+          </div>
+          <div class="stat-card glass-card spotlight-card animate-up" style="--delay: 0.12s">
+            <div class="stat-icon amber">
+              <i data-lucide="flame" class="icon-md"></i>
+            </div>
+            <div class="stat-info">
+              <span>پیگیری‌های در صف</span>
+              <h3 id="statFollowUps">0</h3>
+            </div>
+          </div>
+          <div class="stat-card glass-card spotlight-card animate-up" style="--delay: 0.19s">
+            <div class="stat-icon emerald">
+              <i data-lucide="badge-check" class="icon-md"></i>
+            </div>
+            <div class="stat-info">
+              <span>پیگیری‌شده امروز</span>
+              <h3 id="statDoneToday">0</h3>
+            </div>
+          </div>
+          <div class="stat-card glass-card spotlight-card animate-up" style="--delay: 0.26s">
+            <div class="stat-icon purple">
+              <i data-lucide="award" class="icon-md"></i>
+            </div>
+            <div class="stat-info">
+              <span>فروش بسته موفق</span>
+              <h3 id="statWonSales">0</h3>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-split">
+          <div class="glass-card spotlight-card panel-box animate-up" style="--delay: 0.3s">
+            <div class="box-header">
+              <div class="title-with-icon">
+                <i data-lucide="zap" class="icon-sm text-accent"></i>
+                <h3>اولویت‌های تماس فوری</h3>
+              </div>
+              <button class="btn btn-sm btn-primary" onclick="switchTab('tasks')">
+                <span>مشاهده همه</span>
+                <i data-lucide="chevron-left" class="icon-xs"></i>
+              </button>
+            </div>
+            <div id="urgentTasksPreview" class="mini-list"></div>
+          </div>
+
+          <div class="glass-card spotlight-card panel-box animate-up" style="--delay: 0.36s">
+            <div class="box-header">
+              <div class="title-with-icon">
+                <i data-lucide="trending-up" class="icon-sm text-emerald"></i>
+                <h3>شاخص تکمیل اهداف روزانه</h3>
+              </div>
+            </div>
+
+            <!-- حلقه پیشرفت گرافیکی SVG -->
+            <div class="ring-layout">
+              <div class="progress-ring-box">
+                <svg class="progress-ring" width="128" height="128" viewBox="0 0 128 128">
+                  <defs>
+                    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#6366f1" />
+                      <stop offset="50%" stop-color="#06b6d4" />
+                      <stop offset="100%" stop-color="#10b981" />
+                    </linearGradient>
+                  </defs>
+                  <circle class="ring-track" cx="64" cy="64" r="52" />
+                  <circle id="progressRingCircle" class="ring-fill" cx="64" cy="64" r="52" />
+                </svg>
+                <div class="ring-center-text">
+                  <strong id="progressPercentText">۰٪</strong>
+                  <span>تکمیل</span>
+                </div>
+              </div>
+
+              <div class="ring-details">
+                <p id="progressRatioText" class="ratio-headline">۰ از ۰ تماس</p>
+                <p class="muted-text">همگام‌سازی لحظه‌ای بین گوگل‌شیت، دیتابیس D1 و کانال گزارش‌ها فعال است.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- تب ۲: میز کار تماس‌ها -->
+      <section id="tab-tasks" class="tab-view hidden">
+        <div class="filter-bar glass-panel">
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all">همه تسک‌ها</button>
+            <button class="pill" data-filter="new">تماس‌های اول</button>
+            <button class="pill" data-filter="followup">پیگیری‌ها</button>
+          </div>
+          <div class="input-with-icon search-wrap">
+            <i data-lucide="search" class="input-icon"></i>
+            <input type="search" id="taskSearchInput" class="search-input" placeholder="فیلتر نام، شماره یا تب..." />
+          </div>
+        </div>
+        <div id="tasksGrid" class="cards-grid"></div>
+      </section>
+
+      <!-- تب ۳: پرونده دانشجوها -->
+      <section id="tab-students" class="tab-view hidden">
+        <div class="glass-card panel-box">
+          <div class="search-hero">
+            <div class="title-with-icon">
+              <i data-lucide="folder-search" class="icon-md text-accent"></i>
+              <h3>جستجو و مدیریت پرونده دانشجو</h3>
+            </div>
+            <div class="search-row">
+              <div class="input-with-icon w-full">
+                <i data-lucide="search" class="input-icon"></i>
+                <input type="text" id="studentGlobalSearch" class="search-input lg" placeholder="نام دانشجو، شماره موبایل یا نام تب شیت را وارد کنید..." />
+              </div>
+              <button id="runStudentSearchBtn" class="btn btn-primary btn-glow">
+                <i data-lucide="search" class="icon-sm"></i>
+                <span>جستجو</span>
+              </button>
+            </div>
+          </div>
+          <div id="studentSearchResults" class="cards-grid mt-20"></div>
+        </div>
+      </section>
+
+      <!-- تب ۴: پیگیری شده‌ها -->
+      <section id="tab-followed" class="tab-view hidden">
+        <div class="glass-card panel-box">
+          <div class="box-header">
+            <div class="title-with-icon">
+              <i data-lucide="history" class="icon-md text-emerald"></i>
+              <h3>لیست تماس‌های ثبت‌شده امروز</h3>
+            </div>
+          </div>
+          <div id="followedListContainer" class="timeline-list"></div>
+        </div>
+      </section>
+
+      <!-- تب ۵: ابزارهای هوش مصنوعی -->
+      <section id="tab-aiTools" class="tab-view hidden">
+        <div class="ai-tools-grid">
+          <!-- کارت آپلود فیش -->
+          <div class="glass-card spotlight-card panel-box">
+            <div class="title-with-icon">
+              <i data-lucide="receipt" class="icon-md text-accent"></i>
+              <h3>پردازش هوشمند فیش واریزی</h3>
+            </div>
+            <p class="muted-text">تصویر فیش را بارگذاری کنید تا مبلغ و کد پیگیری استخراج و در اکسل فروش و کانال ثبت شود.</p>
+            <label class="dropzone" id="receiptDropzone">
+              <input type="file" id="receiptFileInput" accept="image/*" hidden />
+              <div class="drop-icon-circle">
+                <i data-lucide="image-plus" class="icon-lg"></i>
+              </div>
+              <strong>انتخاب یا رها کردن تصویر فیش</strong>
+              <small id="receiptFileName">فرمت‌های استاندارد JPG, PNG, WEBP</small>
+            </label>
+            <input type="text" id="receiptCaptionInput" class="search-input lg mt-12" placeholder="نام دانشجو یا توضیح همراه فیش (اختیاری)..." />
+            <button id="uploadReceiptBtn" class="btn btn-primary btn-glow w-full mt-12">
+              <i data-lucide="scan-line" class="icon-sm"></i>
+              <span>استخراج اطلاعات و ثبت فیش</span>
+            </button>
+            <div id="receiptResultBox" class="result-box hidden"></div>
+          </div>
+
+          <!-- کارت تحلیل ویس -->
+          <div class="glass-card spotlight-card panel-box">
+            <div class="title-with-icon">
+              <i data-lucide="audio-waveform" class="icon-md text-primary"></i>
+              <h3>تحلیل روانشناختی و فروش مکالمه</h3>
+            </div>
+            <p class="muted-text">فایل صوتی مکالمه را بارگذاری کنید تا تیپ رفتاری، نیازها، انگیزه‌ها و آبجکشن‌ها تحلیل شوند.</p>
+            <label class="dropzone" id="voiceDropzone">
+              <input type="file" id="voiceFileInput" accept="audio/*" hidden />
+              <div class="equalizer-anim" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <strong>انتخاب یا رها کردن فایل صوتی</strong>
+              <small id="voiceFileName">فرمت‌های OGG, MP3, WAV, M4A</small>
+            </label>
+            <input type="text" id="voiceCaptionInput" class="search-input lg mt-12" placeholder="نام مخاطب یا راهنمای مکالمه (اختیاری)..." />
+            <button id="uploadVoiceBtn" class="btn btn-primary btn-glow w-full mt-12">
+              <i data-lucide="sparkles" class="icon-sm"></i>
+              <span>شروع تحلیل عمیق مکالمه</span>
+            </button>
+            <div id="voiceResultBox" class="result-box hidden"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- مودال ثبت نتیجه تماس -->
+  <div id="outcomeModal" class="modal-backdrop hidden">
+    <div class="glass-card modal-box animate-pop">
+      <div class="modal-header">
+        <div class="title-with-icon">
+          <i data-lucide="phone-forwarded" class="icon-sm text-accent"></i>
+          <h3>ثبت نتیجه تماس</h3>
+        </div>
+        <button id="closeModalBtn" class="icon-close" aria-label="بستن">
+          <i data-lucide="x" class="icon-sm"></i>
+        </button>
+      </div>
+      <div id="modalStudentSummary" class="modal-summary"></div>
+
+      <div class="outcome-options-grid" id="outcomeOptionsGrid">
+        <button type="button" class="outcome-btn" data-outcome="won_sale">
+          <i data-lucide="badge-dollar-sign" class="icon-xs"></i>
+          <span>موفق - فروش بسته</span>
+        </button>
+        <button type="button" class="outcome-btn" data-outcome="future_call">
+          <i data-lucide="calendar-clock" class="icon-xs"></i>
+          <span>پیگیری - تماس آینده</span>
+        </button>
+        <button type="button" class="outcome-btn" data-outcome="no_answer">
+          <i data-lucide="phone-missed" class="icon-xs"></i>
+          <span>پیگیری - جواب نداد</span>
+        </button>
+        <button type="button" class="outcome-btn" data-outcome="switched_off">
+          <i data-lucide="phone-off" class="icon-xs"></i>
+          <span>پیگیری - خاموش بود</span>
+        </button>
+        <button type="button" class="outcome-btn" data-outcome="wrong_num">
+          <i data-lucide="help-circle" class="icon-xs"></i>
+          <span>ناموفق - اشتباه بود</span>
+        </button>
+        <button type="button" class="outcome-btn" data-outcome="def_no">
+          <i data-lucide="ban" class="icon-xs"></i>
+          <span>ناموفق - قطعی نمی‌خواهد</span>
+        </button>
+      </div>
+
+      <div class="input-group mt-12">
+        <label for="modalStudentName">نام دانشجو (در صورت نیاز به تکمیل یا اصلاح)</label>
+        <input type="text" id="modalStudentName" placeholder="نام و نام خانوادگی دانشجو" />
+      </div>
+
+      <div class="input-group mt-12">
+        <label for="modalNoteInput">توضیحات تماس (در قالب [توضیح]/// در شیت ثبت می‌شود)</label>
+        <textarea id="modalNoteInput" rows="3" placeholder="مثلاً: فردا ساعت ۵ عصر تماس گرفته شود..."></textarea>
+      </div>
+
+      <div class="modal-actions mt-12">
+        <button id="saveOutcomeBtn" class="btn btn-primary btn-glow w-full">
+          <i data-lucide="check" class="icon-sm"></i>
+          <span>ثبت نهایی و همگام‌سازی شیت</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- اعلان شناور (Toast) -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
